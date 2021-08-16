@@ -1041,11 +1041,11 @@ class Sequence:
         self._to_build_calls = []
 
 
-    def config_slm_mask(self, *qid: QubitId) -> None:
+    def config_slm_mask(self, qubits: set[QubitId]) -> None:
         """Create the SLM mask attribute and"""
         """specify the qubits that will be affected by the mask."""
         self._slm_mask: dict[str, Union[set[QubitId], list[list]]] = {}
-        self._slm_mask["targets"] = set(qid)
+        self._slm_mask["targets"] = qubits
         self._slm_mask["times"] = []
 
     def set_slm_mask(self, on_state: bool, align_with_channel: str) -> None:
