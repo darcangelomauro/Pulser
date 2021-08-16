@@ -409,6 +409,24 @@ class Simulation:
             )
             samples_dict["phase"][slot.ti : slot.tf] = _pulse.phase
 
+            # Mask qubit if slm in on and targeting it
+            if qubit in self._slm_mask["targets"]:
+                for time in self._slm_mask["times"]:
+                    samples_dict["amp"][time[0] : time[1]] = 0
+                    samples_dict["det"][time[0] : time[1]] = 0
+                    samples_dict["phase"][time[0] : time[1]] = 0
+
+
+
+        def affected_by_slm(slot: _TimeSlot) -> bool:
+        """Check if the SLM is on during a slot"""
+            ti = slot.ti
+            tf = slot.tf
+            for time in self._seq._slm_mask["times"]:
+                if time[0] < tf and time[1] > ti:
+                    return True
+            return False
+
         for channel in self._seq.declared_channels:
             addr = self._seq.declared_channels[channel].addressing
             basis = self._seq.declared_channels[channel].basis
@@ -417,21 +435,30 @@ class Simulation:
             if addr == "Global" and (
                 set(self.config.noise).issubset({"dephasing"})
             ):
-                samples_dict = self.samples["Global"][basis]
-                if not samples_dict:
-                    samples_dict = prepare_dict()
                 for slot in self._seq._schedule[channel]:
+                    mask = affected_by_slm(slot)
                     if isinstance(slot.type, Pulse):
-                        write_samples(slot, samples_dict, True)
-                self.samples["Global"][basis] = samples_dict
+                        if not mask:
+                            samples_dict = self.samples["Global"][basis]
+                            if not samples_dict:
+                                samples_dict = prepare_dict()
+                            write_samples(slot, samples_dict, True)
+                            update_samples("Global", basis, samples_dict)
+                        else:
+                            for qubit in slot.targets:
+                                if qubit not in samples_dict:
+                                    samples_dict[qubit] = prepare_dict()
+                                write_samples(slot, samples_dict[qubit], True, qubit)
+                            update_samples("Local", basis, samples_dict)
+
 
             # Any noise : global becomes local for each qubit in the reg
             # Since coefficients are modified locally by all noises
             else:
                 is_global = addr == "Global"
-                samples_dict = self.samples["Local"][basis]
                 for slot in self._seq._schedule[channel]:
                     if isinstance(slot.type, Pulse):
+                        samples_dict = self.samples["Local"][basis]
                         for qubit in slot.targets:
                             if qubit not in samples_dict:
                                 samples_dict[qubit] = prepare_dict()
@@ -440,7 +467,7 @@ class Simulation:
                                 write_samples(
                                     slot, samples_dict[qubit], is_global, qubit
                                 )
-                self.samples["Local"][basis] = samples_dict
+                    update_samples("Local", basis, samples_dict)
 
     def _build_operator(
         self, op_id: str, *qubit_ids: Union[str, int], global_op: bool = False
