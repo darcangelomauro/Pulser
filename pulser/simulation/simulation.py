@@ -401,22 +401,13 @@ class Simulation:
                 noise_amp = np.random.normal(1.0, 1.0e-3) * np.exp(
                     -((r / w0) ** 2)
                 )
-            samples_dict["amp"][slot.ti : slot.tf] = (
+            samples_dict["amp"][slot.ti : slot.tf] += (
                 _pulse.amplitude.samples * noise_amp
             )
-            samples_dict["det"][slot.ti : slot.tf] = (
+            samples_dict["det"][slot.ti : slot.tf] += (
                 _pulse.detuning.samples + noise_det
             )
-            samples_dict["phase"][slot.ti : slot.tf] = _pulse.phase
-
-            # Mask qubit if slm in on and targeting it
-            if qubit in self._slm_mask["targets"]:
-                for time in self._slm_mask["times"]:
-                    samples_dict["amp"][time[0] : time[1]] = 0
-                    samples_dict["det"][time[0] : time[1]] = 0
-                    samples_dict["phase"][time[0] : time[1]] = 0
-
-
+            samples_dict["phase"][slot.ti : slot.tf] += _pulse.phase
 
         def affected_by_slm(slot: _TimeSlot) -> bool:
         """Check if the SLM is on during a slot"""
@@ -436,21 +427,20 @@ class Simulation:
                 set(self.config.noise).issubset({"dephasing"})
             ):
                 for slot in self._seq._schedule[channel]:
-                    mask = affected_by_slm(slot)
                     if isinstance(slot.type, Pulse):
-                        if not mask:
+                        # If SLM is off during slot, populate global samples
+                        if not affected_by_slm(slot):
                             samples_dict = self.samples["Global"][basis]
                             if not samples_dict:
                                 samples_dict = prepare_dict()
                             write_samples(slot, samples_dict, True)
-                            update_samples("Global", basis, samples_dict)
+                        # Otherwise, populate corresponding local
                         else:
+                            samples_dict = self.samples["Local"][basis]
                             for qubit in slot.targets:
                                 if qubit not in samples_dict:
                                     samples_dict[qubit] = prepare_dict()
                                 write_samples(slot, samples_dict[qubit], True, qubit)
-                            update_samples("Local", basis, samples_dict)
-
 
             # Any noise : global becomes local for each qubit in the reg
             # Since coefficients are modified locally by all noises
@@ -467,7 +457,14 @@ class Simulation:
                                 write_samples(
                                     slot, samples_dict[qubit], is_global, qubit
                                 )
-                    update_samples("Local", basis, samples_dict)
+            
+            # Apply SLM mask if it was defined
+            if self._slm_mask:
+                for qubit in self._slm_mask["targets"]:
+                    for time in self._slm_mask["times"]:
+                        self.samples["Local"][basis][qubit]["amp"][time[0] : time[1]] = 0
+                        self.samples["Local"][basis][qubit]["det"][time[0] : time[1]] = 0
+                        self.samples["Local"][basis][qubit]["phase"][time[0] : time[1]] = 0
 
     def _build_operator(
         self, op_id: str, *qubit_ids: Union[str, int], global_op: bool = False
@@ -560,7 +557,7 @@ class Simulation:
         if not hasattr(self, "basis_name"):
             self._build_basis_and_op_matrices()
 
-        def make_vdw_term() -> qutip.Qobj:
+        def make_unmasked_vdw_term() -> qutip.Qobj:
             """Construct the Van der Waals interaction Term.
 
             For each pair of qubits, calculate the distance between them, then
@@ -572,6 +569,31 @@ class Simulation:
             for q1, q2 in itertools.combinations(self._qdict.keys(), r=2):
                 # no VdW interaction with other qubits for a badly prep. qubit
                 if not (self._bad_atoms[q1] or self._bad_atoms[q2]):
+                    dist = np.linalg.norm(self._qdict[q1] - self._qdict[q2])
+                    U = 0.5 * self._seq._device.interaction_coeff / dist ** 6
+                    vdw += U * self._build_operator("sigma_rr", q1, q2)
+            return vdw
+        
+        def make_masked_vdw_term() -> qutip.Qobj:
+            """Construct the Van der Waals interaction Term when SLM mask
+            is on.
+
+            For each pair of unmasked qubits, calculate the distance between
+            them, then assign the local operator "sigma_rr" at each pair.
+            The units are given so that the coefficient includes a 1/hbar
+            factor.
+            """
+            vdw = 0 * self._build_operator("I")
+            # Get every pair without duplicates
+            for q1, q2 in itertools.combinations(self._qdict.keys(), r=2):
+                # no VdW interaction with other qubits for a badly prep. qubit
+                # or a masked one
+                if not (
+                        self._bad_atoms[q1]
+                        or self._bad_atoms[q2]
+                        or q1 in self._slm_mask["targets"]
+                        or q2 in self._slm_mask["targets"]
+                        ):
                     dist = np.linalg.norm(self._qdict[q1] - self._qdict[q2])
                     U = 0.5 * self._seq._device.interaction_coeff / dist ** 6
                     vdw += U * self._build_operator("sigma_rr", q1, q2)
@@ -631,12 +653,25 @@ class Simulation:
             self.operators[addr][basis] = operators
             return terms
 
+        def build_masked_vdw_coeff() -> list:
+            coeff = np.zeros(self._tot_duration)
+            for time in self._slm_mask["times"]:
+                coeff[time[0]:time[1]] = 1
+            return list(coeff)
+        
+        def build_unmasked_vdw_coeff() -> list:
+            coeff = np.ones(self._tot_duration)
+            for time in self._slm_mask["times"]:
+                coeff[time[0]:time[1]] = 0
+            return list(coeff)
+
         # Time independent term:
         if self.basis_name == "digital" or self._size == 1:
             qobj_list = [0 * self._build_operator("I")]
         else:
             # Van der Waals Interaction Terms
-            qobj_list = [make_vdw_term()]
+            qobj_list = [[make_unmasked_vdw_term(), build_unmasked_vdw_coeff()]]
+            qobj_list = [[make_masked_vdw_term(), build_masked_vdw_coeff()]]
 
         # Time dependent terms:
         for addr in self.samples:

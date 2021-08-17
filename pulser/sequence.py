@@ -198,6 +198,8 @@ class Sequence:
         self._variables: dict[str, Variable] = {}
         self._to_build_calls: list[_Call] = []
         self._building: bool = True
+        # SLM mask targets and on/off times
+        self._slm_mask: dict[str, Union[Set[QubitId], list[list]]] = {}
 
         # Initializes all parametrized Sequence related attributes
         self._reset_parametrized()
@@ -1041,41 +1043,24 @@ class Sequence:
         self._to_build_calls = []
 
 
-    def config_slm_mask(self, qubits: set[QubitId]) -> None:
-        """Create the SLM mask attribute and"""
-        """specify the qubits that will be affected by the mask."""
-        self._slm_mask: dict[str, Union[set[QubitId], list[list]]] = {}
+    def config_slm_mask(self, qubits: Set[QubitId]) -> None:
+        """Specify the qubits that will be affected by the mask."""
         self._slm_mask["targets"] = qubits
         self._slm_mask["times"] = []
 
-    def set_slm_mask(self, on_state: bool, align_with_channel: str) -> None:
-        """If the SLM mask was configured, switch it on or off"""
-        """after the last pulse in 'align_with_channel' ends"""
+    def set_slm_mask(self, align_with_channel: str) -> None:
+        """If the SLM mask was configured, switch it on"""
+        """for the duration of last pulse in channel"""
 
         # Check whether the mask was configured
         # {
         #   code
         # }
 
-
-        # Switch it on or off at the end of specified channel
-        t = self._last(align_with_channel).tf
+        ti = self._last(align_with_channel).ti
+        tf = self._last(align_with_channel).tf
         
-        if on_state:
-            self._slm_mask["times"].append([t, t])
-        
-        else:
-            # Check whether it was on before
-            # {
-            #   code
-            # }
-            self._slm_mask["times"][-1][-1] = t
-
-
-
-
-
-
+        self._slm_mask["times"].append([ti, tf])
 
 class _PhaseTracker:
     """Tracks a phase reference over time."""
