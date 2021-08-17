@@ -1042,7 +1042,6 @@ class Sequence:
         self._variables = {}
         self._to_build_calls = []
 
-
     def config_slm_mask(self, qubits: Set[QubitId]) -> None:
         """Specify the qubits that will be affected by the mask."""
         self._slm_mask["targets"] = qubits
@@ -1052,15 +1051,12 @@ class Sequence:
         """If the SLM mask was configured, switch it on"""
         """for the duration of last pulse in channel"""
 
-        # Check whether the mask was configured
-        # {
-        #   code
-        # }
-
-        ti = self._last(align_with_channel).ti
-        tf = self._last(align_with_channel).tf
-        
-        self._slm_mask["times"].append([ti, tf])
+        if self._slm_mask:
+            ti = self._last(align_with_channel).ti
+            tf = self._last(align_with_channel).tf
+            self._slm_mask["times"].append([ti, tf])
+        else:
+            raise ValueError("SLM mask was not configured")
 
 class _PhaseTracker:
     """Tracks a phase reference over time."""
