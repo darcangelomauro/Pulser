@@ -434,6 +434,7 @@ class Simulation:
                             if not samples_dict:
                                 samples_dict = prepare_dict()
                             write_samples(slot, samples_dict, True)
+                            self.samples["Global"][basis] = samples_dict
                         # Otherwise, populate corresponding local
                         else:
                             samples_dict = self.samples["Local"][basis]
@@ -443,6 +444,7 @@ class Simulation:
                                 write_samples(
                                     slot, samples_dict[qubit], True, qubit
                                 )
+                            self.samples["Local"][basis] = samples_dict
 
             # Any noise : global becomes local for each qubit in the reg
             # Since coefficients are modified locally by all noises
@@ -459,6 +461,7 @@ class Simulation:
                                 write_samples(
                                     slot, samples_dict[qubit], is_global, qubit
                                 )
+                        self.samples["Local"][basis] = samples_dict
 
             # Apply SLM mask if it was defined
             if self._seq._slm_mask_targets:
