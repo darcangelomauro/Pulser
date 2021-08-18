@@ -565,7 +565,7 @@ class Simulation:
         if not hasattr(self, "basis_name"):
             self._build_basis_and_op_matrices()
 
-        def make_unmasked_vdw_term() -> qutip.Qobj:
+        def make_vdw_term() -> qutip.Qobj:
             """Construct the Van der Waals interaction Term.
 
             For each pair of qubits, calculate the distance between them, then
@@ -676,11 +676,14 @@ class Simulation:
         if self.basis_name == "digital" or self._size == 1:
             qobj_list = [0 * self._build_operator("I")]
         else:
-            # Van der Waals Interaction Terms
-            qobj_list = [
-                [make_unmasked_vdw_term(), build_unmasked_vdw_coeff()]
-            ]
-            qobj_list = [[make_masked_vdw_term(), build_masked_vdw_coeff()]]
+            if self._seq._slm_mask_targets:
+                # Van der Waals Interaction Terms
+                qobj_list = [[make_vdw_term(), build_unmasked_vdw_coeff()]]
+                qobj_list = [
+                    [make_masked_vdw_term(), build_masked_vdw_coeff()]
+                ]
+            else:
+                qobj_list = [make_vdw_term()]
 
         # Time dependent terms:
         for addr in self.samples:

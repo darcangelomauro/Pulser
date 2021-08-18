@@ -199,7 +199,7 @@ class Sequence:
         self._to_build_calls: list[_Call] = []
         self._building: bool = True
         # SLM mask targets and on/off times
-        self._slm_mask_targets: Set[QubitId]
+        self._slm_mask_targets: Set[QubitId] = set()
         self._slm_mask_times: list[list] = []
 
         # Initializes all parametrized Sequence related attributes
