@@ -459,3 +459,6 @@ def test_set_slm_mask():
     seq.set_slm_mask('ch0')
 
     assert seq._slm_mask_times == [[0, 100], [300, 600]]
+
+    with patch("matplotlib.pyplot.show"):
+        seq.draw()
