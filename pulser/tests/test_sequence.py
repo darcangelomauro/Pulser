@@ -363,3 +363,99 @@ def test_sequence():
     assert json.loads(s)["__version__"] == pulser.__version__
     seq_ = Sequence.deserialize(s)
     assert str(seq) == str(seq_)
+
+
+def test_config_slm_mask():
+    reg_s = Register({"q0": (0, 0), "q1": (10, 10), "q2": (-10, -10)})
+    seq_s = Sequence(reg_s, device)
+
+    with pytest.raises(TypeError, match="SLM targets are not an iterable"):
+        seq_s.config_slm_mask(0)
+    with pytest.raises(TypeError, match="SLM targets are not an iterable"):
+        seq_s.config_slm_mask((0))
+    with pytest.raises(ValueError, match="exist in the register"):
+        seq_s.config_slm_mask("q0")
+    with pytest.raises(ValueError, match="exist in the register"):
+        seq_s.config_slm_mask(["q3"])
+    with pytest.raises(ValueError, match="exist in the register"):
+        seq_s.config_slm_mask(("q3",))
+    with pytest.raises(ValueError, match="exist in the register"):
+        seq_s.config_slm_mask({"q3"})
+    with pytest.raises(ValueError, match="exist in the register"):
+        seq_s.config_slm_mask([0])
+    with pytest.raises(ValueError, match="exist in the register"):
+        seq_s.config_slm_mask((0,))
+    with pytest.raises(ValueError, match="exist in the register"):
+        seq_s.config_slm_mask({0})
+
+    targets_s = ["q0", "q2"]
+    seq_s.config_slm_mask(targets_s)
+    assert seq_s._slm_mask_targets == {"q0", "q2"}
+
+    with pytest.raises(ValueError, match="configured only once"):
+        seq_s.config_slm_mask(targets_s)
+
+    reg_i = Register({0: (0, 0), 1: (10, 10), 2: (-10, -10)})
+    seq_i = Sequence(reg_i, device)
+
+    with pytest.raises(TypeError, match="SLM targets are not an iterable"):
+        seq_i.config_slm_mask(0)
+    with pytest.raises(TypeError, match="SLM targets are not an iterable"):
+        seq_i.config_slm_mask((0))
+    with pytest.raises(ValueError, match="exist in the register"):
+        seq_i.config_slm_mask("q0")
+    with pytest.raises(ValueError, match="exist in the register"):
+        seq_i.config_slm_mask([3])
+    with pytest.raises(ValueError, match="exist in the register"):
+        seq_i.config_slm_mask((3,))
+    with pytest.raises(ValueError, match="exist in the register"):
+        seq_i.config_slm_mask({3})
+    with pytest.raises(ValueError, match="exist in the register"):
+        seq_i.config_slm_mask(["0"])
+    with pytest.raises(ValueError, match="exist in the register"):
+        seq_i.config_slm_mask(("0",))
+    with pytest.raises(ValueError, match="exist in the register"):
+        seq_i.config_slm_mask({"0"})
+
+    targets_i = [0, 2]
+    seq_i.config_slm_mask(targets_i)
+    assert seq_i._slm_mask_targets == {0, 2}
+
+    with pytest.raises(ValueError, match="configured only once"):
+        seq_i.config_slm_mask(targets_i)
+
+
+def test_set_slm_mask():
+    reg = Register({"q0": (0, 0), "q1": (10, 10), "q2": (-10, -10)})
+    seq = Sequence(reg, device)
+
+    # Try to align the mask to a non-existing channel
+    with pytest.raises(ValueError, match="name of a declared channel"):
+        seq.set_slm_mask('ch0')
+
+    seq.declare_channel('ch0', 'rydberg_global')
+
+    # Try to align a mask that has not been configured
+    with pytest.raises(ValueError, match="SLM mask was not configured"):
+        seq.set_slm_mask('ch0')
+
+    targets = ["q0", "q2"]
+    seq.config_slm_mask(targets)
+
+    # Try to align the mask to a channel with no pulses
+    with pytest.raises(ValueError, match="No pulse in chosen channel"):
+        seq.set_slm_mask('ch0')
+
+    pulse1 = Pulse.ConstantPulse(100, 10, 0, 0)
+    pulse2 = Pulse.ConstantPulse(200, 10, 0, 0)
+    pulse3 = Pulse.ConstantPulse(300, 10, 0, 0)
+    seq.add(pulse1, 'ch0')
+    seq.set_slm_mask('ch0')
+
+    assert seq._slm_mask_times == [[0, 100]]
+
+    seq.add(pulse2, 'ch0')
+    seq.add(pulse3, 'ch0')
+    seq.set_slm_mask('ch0')
+
+    assert seq._slm_mask_times == [[0, 100], [300, 600]]
