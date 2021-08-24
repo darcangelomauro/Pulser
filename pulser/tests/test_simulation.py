@@ -527,3 +527,125 @@ def test_add_config():
     sim.add_config(SimConfig(noise=("SPAM", "amplitude"), laser_waist=172.0))
     assert "amplitude" in sim.config.noise and "SPAM" in sim.config.noise
     assert sim.config.laser_waist == 172.0
+
+
+def test_mask_equals_remove():
+    """Check that masking is equivalent to removing the masked qubits.
+
+    A global pulse acting on three qubits of which one is masked, should be
+    equivalent to acting on a register with only the two unmasked qubits.
+    """
+    reg_three = Register({"q0": (0, 0), "q1": (10, 10), "q2": (-10, -10)})
+    reg_two = Register({"q0": (0, 0), "q1": (10, 10)})
+    pulse = Pulse.ConstantPulse(100, 10, 0, 0)
+
+    # Masked simulation
+    seq_masked = Sequence(reg_three, Chadoq2)
+    seq_masked.declare_channel('ch_masked', 'rydberg_global')
+    masked_qubits = ["q2"]
+    seq_masked.config_slm_mask(masked_qubits)
+    seq_masked.add(pulse, 'ch_masked')
+    seq_masked.set_slm_mask('ch_masked')
+    sim_masked = Simulation(seq_masked)
+
+    # Simulation on reduced register
+    seq_two = Sequence(reg_two, Chadoq2)
+    seq_two.declare_channel('ch_two', 'rydberg_global')
+    seq_two.add(pulse, 'ch_two')
+    sim_two = Simulation(seq_two)
+
+    for t in sim_two._times:
+        ham_masked = sim_masked.get_hamiltonian(t)
+        ham_two = sim_two.get_hamiltonian(t)
+        assert ham_masked == qutip.tensor(ham_two, qutip.qeye(2))
+
+
+def test_mask_equals_local():
+    """Check that masking is equivalent to acting locally, modulo VdW.
+
+    A global pulse acting on three qubits of which two are masked, should be
+    equivalent to acting locally on the only unmasked qubit and suppressing
+    the Van der Waals interactions.
+    """
+    reg = Register({"q0": (0, 0), "q1": (10, 10), "q2": (-10, -10)})
+    pulse = Pulse.ConstantPulse(100, 10, 0, 0)
+    no_pulse = Pulse.ConstantPulse(100, 0, 0, 0)
+
+    # Masked simulation
+    seq_masked = Sequence(reg, Chadoq2)
+    seq_masked.declare_channel('ch_masked', 'rydberg_global')
+    masked_qubits = ["q0", "q2"]
+    seq_masked.config_slm_mask(masked_qubits)
+    seq_masked.add(pulse, 'ch_masked')
+    seq_masked.set_slm_mask('ch_masked')
+    sim_masked = Simulation(seq_masked)
+
+    # Unmasked local simulation
+    seq_local = Sequence(reg, Chadoq2)
+    seq_local.declare_channel('ch_local', 'rydberg_local', initial_target='q1')
+    seq_local.add(pulse, 'ch_local')
+    sim_local = Simulation(seq_local)
+
+    # Vand der Waals term
+    seq_vdw = Sequence(reg, Chadoq2)
+    seq_vdw.declare_channel('ch_vdw', 'rydberg_global')
+    seq_vdw.add(no_pulse, 'ch_vdw')
+    sim_vdw = Simulation(seq_vdw)
+
+    for t in sim_local._times:
+        ham_masked = sim_masked.get_hamiltonian(t)
+        ham_local = sim_local.get_hamiltonian(t)
+        ham_vdw = sim_vdw.get_hamiltonian(t)
+        assert ham_masked == ham_local-ham_vdw
+
+
+def test_two_masks():
+    """Similar to test_mask_equals_local, but with more masked pulses.
+
+    Three global pulses act on a three qubit register, with two qubits masked
+    during the first and third pulse. Check that the activation and
+    deactivation of the mask works properly.
+    """
+    reg = Register({"q0": (0, 0), "q1": (10, 10), "q2": (-10, -10)})
+    pulse = Pulse.ConstantPulse(100, 10, 0, 0)
+    no_pulse = Pulse.ConstantPulse(100, 0, 0, 0)
+
+    # Masked simulation
+    seq_masked = Sequence(reg, Chadoq2)
+    seq_masked.declare_channel('ch_masked', 'rydberg_global')
+    masked_qubits = ["q0", "q2"]
+    seq_masked.config_slm_mask(masked_qubits)
+    seq_masked.add(pulse, 'ch_masked')  # First pulse: masked
+    seq_masked.set_slm_mask('ch_masked')
+    seq_masked.add(pulse, 'ch_masked')  # Second pulse: unmasked
+    seq_masked.add(pulse, 'ch_masked')  # Third pulse: masked
+    seq_masked.set_slm_mask('ch_masked')
+    sim_masked = Simulation(seq_masked)
+
+    # Unmasked simulation
+    seq_local = Sequence(reg, Chadoq2)
+    seq_local.declare_channel('ch_local', 'rydberg_local', initial_target='q1')
+    seq_local.declare_channel('ch_global', 'rydberg_global')
+    seq_local.add(pulse, 'ch_local')
+    seq_local.add(pulse, 'ch_global')
+    seq_local.add(pulse, 'ch_local')
+    sim_local = Simulation(seq_local)
+
+    # Van der Waals term
+    seq_vdw = Sequence(reg, Chadoq2)
+    seq_vdw.declare_channel('ch_vdw', 'rydberg_global')
+    seq_vdw.add(no_pulse, 'ch_vdw')
+    seq_vdw.add(no_pulse, 'ch_vdw')
+    seq_vdw.add(no_pulse, 'ch_vdw')
+    sim_vdw = Simulation(seq_vdw)
+
+    for t in sim_local._times:
+        ham_masked = sim_masked.get_hamiltonian(t)
+        ham_local = sim_local.get_hamiltonian(t)
+        if np.any(
+            time[0] < t < time[1] for time in seq_masked._slm_mask_times
+        ):
+            ham_vdw = sim_vdw.get_hamiltonian(t)
+            assert ham_masked == ham_local-ham_vdw
+        else:
+            assert ham_masked == ham_local

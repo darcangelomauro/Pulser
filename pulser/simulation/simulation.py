@@ -663,17 +663,17 @@ class Simulation:
             self.operators[addr][basis] = operators
             return terms
 
-        def build_masked_vdw_coeff() -> list:
+        def build_masked_vdw_coeff() -> np.ndarray:
             coeff = np.zeros(self._tot_duration)
             for time in self._seq._slm_mask_times:
                 coeff[time[0] : time[1]] = 1
-            return list(coeff)
+            return coeff
 
-        def build_unmasked_vdw_coeff() -> list:
+        def build_unmasked_vdw_coeff() -> np.ndarray:
             coeff = np.ones(self._tot_duration)
             for time in self._seq._slm_mask_times:
                 coeff[time[0] : time[1]] = 0
-            return list(coeff)
+            return coeff
 
         # Time independent term:
         if self.basis_name == "digital" or self._size == 1:
@@ -681,9 +681,19 @@ class Simulation:
         else:
             if self._seq._slm_mask_targets:
                 # Van der Waals Interaction Terms
-                qobj_list = [[make_vdw_term(), build_unmasked_vdw_coeff()]]
+                um_coeff = build_unmasked_vdw_coeff()
+                m_coeff = build_masked_vdw_coeff()
                 qobj_list = [
-                    [make_masked_vdw_term(), build_masked_vdw_coeff()]
+                    [
+                        make_vdw_term(),
+                        self._adapt_to_sampling_rate(um_coeff)
+                    ]
+                ]
+                qobj_list += [
+                    [
+                        make_masked_vdw_term(),
+                        self._adapt_to_sampling_rate(m_coeff)
+                    ]
                 ]
             else:
                 qobj_list = [make_vdw_term()]
